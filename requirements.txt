@@ -1,0 +1,7 @@
+insightface
+onnxruntime
+onnx
+dlib
+opencv-python
+matplotlib
+numpy
