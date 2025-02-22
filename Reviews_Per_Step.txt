@@ -1,0 +1,6 @@
+===== 22 / 02 =====
+Hoàn thành filter: Kính, Nón
+Model: Dlib, SCRFD
+
+Nhận xét: SCRFD được đánh giá là mô hình nhận dạng mạnh hơn nhiều so với Dlib. 
+Tuy nhiên, khi test trên Camera thời gian thực, nó bị giật lag hơn Dlib và chỉ tốt khi có GPU.
