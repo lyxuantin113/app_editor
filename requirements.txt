@@ -1,6 +1,8 @@
 insightface
 onnxruntime
 onnx
+cmake
+wheel
 dlib
 opencv-python
 matplotlib

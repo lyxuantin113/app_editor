@@ -4,6 +4,9 @@ FROM python:3.10
 # Đặt thư mục làm việc trong container
 WORKDIR /app
 
+# Cài đặt CMake trước khi cài thư viện Python
+RUN apt-get update && apt-get install -y cmake
+
 # Copy toàn bộ project vào container
 COPY . /app
 

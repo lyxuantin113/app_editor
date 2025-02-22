@@ -3,6 +3,8 @@ import numpy as np
 import os
 import dlib
 
+from Filter.drop_item import filter_and_overlay
+
 # ========================== SETUP ==========================
 
 # Cấu hình đường dẫn cho ảnh
@@ -69,8 +71,10 @@ def align_faces(src_landmarks, dst_landmarks):
 
 def multi_band_blending(src_img, dst_img, mask, num_levels=5):
     gp_mask = [mask.astype(np.float32)]
+    print(gp_mask)
     for i in range(num_levels):
         gp_mask.append(cv2.pyrDown(gp_mask[-1]))
+    print(gp_mask)
 
     gp_src = [src_img.astype(np.float32)]
     gp_dst = [dst_img.astype(np.float32)]
@@ -98,6 +102,7 @@ def multi_band_blending(src_img, dst_img, mask, num_levels=5):
 
     return blended_img.astype(np.uint8)
 
+# key_indices: Chọn các điểm khuôn mặt để xử lý
 def swap_facial_features(src_img, dst_img, src_landmarks, dst_landmarks):
     key_indices = list(range(17, 27)) + list(range(27, 36)) + list(range(36, 48)) + list(range(48, 68))
     M = align_faces(dst_landmarks, src_landmarks)
@@ -106,7 +111,90 @@ def swap_facial_features(src_img, dst_img, src_landmarks, dst_landmarks):
     blended_face = multi_band_blending(dst_img_aligned, src_img, mask, num_levels=5)
     return blended_face
 
+# ========================== Filtering ==========================
+
+def apply_face_filter(image, filter_img, landmarks, scale_factor=2.2, position_factor=0.5):
+    """
+    Áp dụng filter (kính/mũ) lên khuôn mặt.
+
+    Parameters:
+    - image: Ảnh gốc.
+    - filter_img: Ảnh filter (có thể là kính hoặc mũ).
+    - landmarks: Danh sách tọa độ landmarks của khuôn mặt.
+    - scale_factor: Độ rộng của filter so với khoảng cách hai mắt.
+        . kính: 2.1
+        . nón : 2.0
+    - position_factor: Hệ số điều chỉnh vị trí filter theo chiều dọc.
+        . kính: 0.65
+        . nón : 1.2
+    """
+
+    left_eye = landmarks[36]  # Góc ngoài mắt trái
+    right_eye = landmarks[45]  # Góc ngoài mắt phải
+    nose = landmarks[30]  # Chóp mũi
+
+    # 1️⃣ Tính khoảng cách giữa hai mắt
+    eye_width = np.linalg.norm(np.array(right_eye) - np.array(left_eye))
+
+    # 2️⃣ Xác định kích thước filter
+    filter_width = int(eye_width * scale_factor)
+    aspect_ratio = filter_img.shape[0] / filter_img.shape[1]
+    filter_height = int(filter_width * aspect_ratio)
+
+    # 3️⃣ Resize filter
+    filter_resized = cv2.resize(filter_img, (filter_width, filter_height), interpolation=cv2.INTER_AREA)
+
+    # 4️⃣ Tính góc xoay của filter
+    dx = right_eye[0] - left_eye[0]
+    dy = right_eye[1] - left_eye[1]
+    angle = -np.degrees(np.arctan2(dy, dx))
+
+    center = (filter_width // 2, filter_height // 2)
+    rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    filter_rotated = cv2.warpAffine(filter_resized, rotation_matrix, (filter_width, filter_height),
+                                    flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+
+    # 5️⃣ Xác định vị trí đặt filter
+    anchor_x = int((left_eye[0] + right_eye[0]) / 2) - filter_width // 2
+    anchor_y = int(nose[1] - filter_height * position_factor)
+
+    # 6️⃣ Xác định vùng hợp lệ trong ảnh gốc
+    x1, y1 = anchor_x, anchor_y
+    x2, y2 = anchor_x + filter_width, anchor_y + filter_height
+
+    # Cắt filter nếu vượt khỏi ảnh
+    filter_x1 = max(0, -x1)
+    filter_x2 = filter_width - max(0, x2 - image.shape[1])
+    filter_y1 = max(0, -y1)
+    filter_y2 = filter_height - max(0, y2 - image.shape[0])
+
+    x1, x2 = max(0, x1), min(image.shape[1], x2)
+    y1, y2 = max(0, y1), min(image.shape[0], y2)
+
+    # Cắt filter để khớp với kích thước hợp lệ
+    filter_cropped = filter_rotated[filter_y1:filter_y2, filter_x1:filter_x2]
+
+    # Xử lý kênh alpha
+    if filter_cropped.shape[-1] == 4:
+        mask = filter_cropped[:, :, 3]
+    else:
+        mask = np.ones(filter_cropped.shape[:2], dtype=np.uint8) * 255
+    mask_inv = cv2.bitwise_not(mask)
+
+    # Vùng ảnh đích
+    roi = image[y1:y2, x1:x2]
+    roi_bg = cv2.bitwise_and(roi, roi, mask=mask_inv)
+    roi_fg = cv2.bitwise_and(filter_cropped[:, :, :3], filter_cropped[:, :, :3], mask=mask)
+    result = cv2.add(roi_bg, roi_fg)
+
+    # Chèn vào ảnh gốc
+    image[y1:y2, x1:x2] = result
+
+    return image
+
+
 # ========================== REAL-TIME FACE SWAP ==========================
+filter_image = cv2.imread(os.path.join(IMG_DIR, "hat3.png"), cv2.IMREAD_UNCHANGED)
 
 cap = cv2.VideoCapture(0)
 while True:
@@ -116,15 +204,18 @@ while True:
 
     frame = cv2.flip(frame, 1)
     faces = detector(frame)
-    faces_img1 = detector(img1)
+    #1 faces_img1 = detector(img1)
 
-    if len(faces) > 0 and len(faces_img1) > 0:
+    #1 if len(faces) > 0 and len(faces_img1) > 0:
+    if len(faces) > 0 and filter_image is not None:
         landmarks_frame = get_landmarks(frame, faces[0], predictor)
-        landmarks_img1 = get_landmarks(img1, faces_img1[0], predictor)
-        swapped_face = swap_facial_features(img1, frame, landmarks_img1, landmarks_frame)
-        cv2.imshow("Face Swap Real-Time", swapped_face)
+        #1 landmarks_img1 = get_landmarks(img1, faces_img1[0], predictor) 
+        #1 swapped_face = swap_facial_features(frame, img1, landmarks_frame, landmarks_img1)
+        #1 cv2.imshow("Face Swap Real-Time", swapped_face)
+        applied_filter = apply_face_filter(frame, filter_image, landmarks_frame, scale_factor=2, position_factor=1.2)
+        cv2.imshow("Face Swap Real-Time", applied_filter)
     else:
-        cv2.imshow("Face Swap Real-Time", img1)
+        cv2.imshow("Face Swap Real-Time", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break

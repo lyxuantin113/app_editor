@@ -1,0 +1,113 @@
+def apply_glasses_filter(image, glasses, landmarks):
+    left_eye = landmarks[36]  # Outer corner of left eye
+    right_eye = landmarks[45]  # Outer corner of right eye
+    nose = landmarks[30]  # Nose tip
+
+    # Compute eye width and adjust glasses size
+    eye_width = right_eye[0] - left_eye[0]
+    glasses_width = int(eye_width * 2.2)
+    aspect_ratio = glasses.shape[0] / glasses.shape[1]
+    glasses_height = int(glasses_width * aspect_ratio)
+
+    # Resize glasses
+    glasses_resized = cv2.resize(glasses, (glasses_width, glasses_height), interpolation=cv2.INTER_AREA)
+
+    # Compute rotation angle
+    dx = right_eye[0] - left_eye[0]
+    dy = right_eye[1] - left_eye[1]
+    angle = -np.degrees(np.arctan2(dy, dx))
+
+    # Rotate glasses
+    center = (glasses_width // 2, glasses_height // 2)
+    rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    glasses_rotated = cv2.warpAffine(glasses_resized, rotation_matrix, (glasses_width, glasses_height), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+
+    # Compute position
+    x_offset = left_eye[0] - int(eye_width * 0.6)
+    y_offset = left_eye[1] - int(glasses_height / 2)
+
+    # Clip to fit image bounds
+    x1, x2 = max(0, x_offset), min(image.shape[1], x_offset + glasses_width)
+    y1, y2 = max(0, y_offset), min(image.shape[0], y_offset + glasses_height)
+
+    # Ensure glasses are within image bounds
+    glasses_cropped = glasses_rotated[:y2 - y1, :x2 - x1]
+
+    # Extract alpha channel as mask
+    if glasses_cropped.shape[-1] == 4:
+        mask = glasses_cropped[:, :, 3]
+    else:
+        mask = np.ones(glasses_cropped.shape[:2], dtype=np.uint8) * 255
+
+    mask_inv = cv2.bitwise_not(mask)
+
+    # Create region of interest (ROI)
+    roi = image[y1:y2, x1:x2]
+
+    # Apply glasses
+    roi_bg = cv2.bitwise_and(roi, roi, mask=mask_inv)
+    roi_fg = cv2.bitwise_and(glasses_cropped[:, :, :3], glasses_cropped[:, :, :3], mask=mask)
+    result = cv2.add(roi_bg, roi_fg)
+
+    # Insert glasses back into image
+    image[y1:y2, x1:x2] = result
+
+    return image
+
+
+def apply_hat_filter(image, hat, landmarks):
+    left_eye = landmarks[36]  # Outer corner of left eye
+    right_eye = landmarks[45]  # Outer corner of right eye
+    nose = landmarks[30]  # Nose tip
+
+    # Compute eye width and adjust hat size
+    eye_width = np.linalg.norm(np.array(right_eye) - np.array(left_eye))
+    hat_width = int(eye_width * 2.5)  # Make the hat wider than the eye distance
+    aspect_ratio = hat.shape[0] / hat.shape[1]
+    hat_height = int(hat_width * aspect_ratio)
+
+    # Resize hat
+    hat_resized = cv2.resize(hat, (hat_width, hat_height), interpolation=cv2.INTER_AREA)
+
+    # Compute rotation angle based on eye alignment
+    dx = right_eye[0] - left_eye[0]
+    dy = right_eye[1] - left_eye[1]
+    angle = -np.degrees(np.arctan2(dy, dx))
+
+    # Rotate hat
+    center = (hat_width // 2, hat_height // 2)
+    rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    hat_rotated = cv2.warpAffine(hat_resized, rotation_matrix, (hat_width, hat_height), 
+                                 flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+
+    # Compute position (above forehead)
+    forehead_x = int((left_eye[0] + right_eye[0]) / 2) - hat_width // 2
+    forehead_y = int(nose[1] - hat_height * 1.2)  # Position above the nose
+
+    # Clip to fit image bounds
+    x1, x2 = max(0, forehead_x), min(image.shape[1], forehead_x + hat_width)
+    y1, y2 = max(0, forehead_y), min(image.shape[0], forehead_y + hat_height)
+
+    # Ensure hat is within image bounds
+    hat_cropped = hat_rotated[:y2 - y1, :x2 - x1]
+
+    # Extract alpha channel as mask
+    if hat_cropped.shape[-1] == 4:
+        mask = hat_cropped[:, :, 3]
+    else:
+        mask = np.ones(hat_cropped.shape[:2], dtype=np.uint8) * 255
+
+    mask_inv = cv2.bitwise_not(mask)
+
+    # Create region of interest (ROI)
+    roi = image[y1:y2, x1:x2]
+
+    # Apply hat
+    roi_bg = cv2.bitwise_and(roi, roi, mask=mask_inv)
+    roi_fg = cv2.bitwise_and(hat_cropped[:, :, :3], hat_cropped[:, :, :3], mask=mask)
+    result = cv2.add(roi_bg, roi_fg)
+
+    # Insert hat back into image
+    image[y1:y2, x1:x2] = result
+
+    return image
