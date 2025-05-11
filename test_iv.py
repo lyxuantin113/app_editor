@@ -3,8 +3,6 @@ import numpy as np
 import os
 import dlib
 
-from Filter.drop_item import filter_and_overlay
-
 # ========================== SETUP ==========================
 
 # Cấu hình đường dẫn cho ảnh
