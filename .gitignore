@@ -1,7 +1,6 @@
 venv/
 __pycache__/
 .DS_Store
-CV_Lab/shape_predictor_68_face_landmarks.dat
 arcface/CelebA/a
 arcface/CelebA/img_align_celeba
 arcface/CelebA/processed_faces
